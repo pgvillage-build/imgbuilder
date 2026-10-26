@@ -4,8 +4,8 @@
 # renovate: datasource=github-releases depName=pgvillage-tools/wal-g versioning=loose
 ARG WALG_VERSION=v3.0.9b
 
-# same Debian release as the final image, so the binary links against the same glibc
-FROM docker.io/library/debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS build
+# same Debian release as the final image, so the binary links against the same glibc; Renovate bumps both together
+FROM docker.io/library/debian:13-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS build
 
 ARG WALG_VERSION
 # renovate: datasource=golang-version depName=go

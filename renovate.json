@@ -1,17 +1,100 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "docker:pinDigests"],
-  "schedule": ["before 6am on monday"],
+  "extends": [
+    "config:recommended",
+    "docker:pinDigests"
+  ],
+  "schedule": [
+    "before 6am on monday"
+  ],
   "semanticCommits": "enabled",
-  "labels": ["dependencies"],
+  "labels": [
+    "dependencies"
+  ],
   "customManagers": [
     {
       "customType": "regex",
       "description": "Versions pinned in the Dockerfiles: the ARG below a renovate comment (wal-g tag, go version)",
-      "managerFilePatterns": ["/^images/[^/]+/Dockerfile$/"],
+      "managerFilePatterns": [
+        "/^images/[^/]+/Dockerfile$/"
+      ],
       "matchStrings": [
         "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)(?:\\s+versioning=(?<versioning>\\S+))?\\s*\\nARG\\s+[A-Z_]+=(?<currentValue>\\S+)"
       ]
+    },
+    {
+      "customType": "regex",
+      "description": "Debian release of the distroless base; dropping the digest, which Renovate then pins again",
+      "managerFilePatterns": [
+        "/^images/[^/]+/Dockerfile$/"
+      ],
+      "matchStrings": [
+        "gcr\\.io/distroless/base-debian(?<currentValue>\\d+):nonroot@sha256:[a-f0-9]{64}"
+      ],
+      "autoReplaceStringTemplate": "gcr.io/distroless/base-debian{{{newValue}}}:nonroot",
+      "depNameTemplate": "debian release",
+      "datasourceTemplate": "custom.distroless-debian",
+      "versioningTemplate": "regex:^(?<major>\\d+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Debian release of the build stage, following distroless (not Docker Hub, which has it earlier)",
+      "managerFilePatterns": [
+        "/^images/[^/]+/Dockerfile$/"
+      ],
+      "matchStrings": [
+        "docker\\.io/library/debian:(?<currentValue>\\d+)-slim@sha256:[a-f0-9]{64}"
+      ],
+      "autoReplaceStringTemplate": "docker.io/library/debian:{{{newValue}}}-slim",
+      "depNameTemplate": "debian release",
+      "datasourceTemplate": "custom.distroless-debian",
+      "versioningTemplate": "regex:^(?<major>\\d+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Ubuntu runner labels inside expressions (amd64 and -arm), which the github-actions manager skips",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "'ubuntu-(?<currentValue>\\d+\\.\\d+)(?:-arm)?'"
+      ],
+      "depNameTemplate": "ubuntu",
+      "datasourceTemplate": "github-runners"
+    }
+  ],
+  "customDatasources": {
+    "distroless-debian": {
+      "description": "Debian releases that distroless offers: the NN of the gcr.io/distroless/base-debianNN images",
+      "defaultRegistryUrlTemplate": "https://gcr.io/v2/distroless/tags/list",
+      "format": "json",
+      "transformTemplates": [
+        "{\"releases\": [child[$contains($, /^base-debian[0-9]+$/)].{\"version\": $substringAfter($, \"base-debian\")}]}"
+      ]
+    }
+  },
+  "packageRules": [
+    {
+      "description": "Move the build stage and the distroless base to a new Debian release in one PR",
+      "matchDepNames": [
+        "debian release"
+      ],
+      "groupName": "debian release"
+    },
+    {
+      "description": "The Debian release of the build stage follows distroless (debian release above), so only digests here",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchPackageNames": [
+        "docker.io/library/debian"
+      ],
+      "matchUpdateTypes": [
+        "major",
+        "minor",
+        "patch"
+      ],
+      "enabled": false
     }
   ]
 }
