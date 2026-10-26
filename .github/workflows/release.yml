@@ -1,0 +1,113 @@
+name: Release workflow for tagged versions
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/wal-g-pg
+  CONTEXT: images/wal-g-pg
+
+jobs:
+  # each arch is built natively and pushed by digest only; the merge job tags the multi-arch manifest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - amd64
+          - arm64
+    permissions:
+      contents: read
+      packages: write
+    # build on a runner of the target arch (native arm64 runners are free for public repos), no QEMU
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ env.CONTEXT }}
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: export digest
+        run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          DIGEST="${{ steps.build.outputs.digest }}"
+          touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+
+  merge:
+    needs:
+      - build
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: read the wal-g version from the Dockerfile
+        id: version
+        run: |
+          VERSION=$(sed -n 's/^ARG WALG_VERSION=v\{0,1\}//p' "${CONTEXT}/Dockerfile")
+          echo "wal-g version ${VERSION}"
+          [ -n "${VERSION}" ]
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: digests-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+            type=sha
+
+      - name: create the multi-arch manifest
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          # ghcr reads the source (repo link), description and license from the index annotations
+          # shellcheck disable=SC2046
+          docker buildx imagetools create \
+            --annotation "index:org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --annotation "index:org.opencontainers.image.description=wal-g for PostgreSQL (wal-g-pg), built from pgvillage-tools/wal-g" \
+            --annotation "index:org.opencontainers.image.licenses=Apache-2.0" \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "${DOCKER_METADATA_OUTPUT_JSON}") \
+            $(printf "${IMAGE}@sha256:%s " *)
+
+      - name: inspect the image
+        run: docker buildx imagetools inspect "${IMAGE}:${{ steps.version.outputs.version }}"
