@@ -38,24 +38,6 @@ jobs:
           echo "Runs as user ${USER}"
           [ "${USER}" = 65532 ]
 
-  check-build-status:
-    runs-on: ubuntu-latest
-    needs:
-      - build
-    if: always()
-    steps:
-      - name: Evaluate build status
-        run: |
-          echo "Build images result: ${{ needs.build.result }}"
-
-          for RESULT in ${{ join(needs.*.result, ' ') }}; do
-            case "$RESULT" in
-              success | skipped) ;;
-              failure) exit 1 ;;
-              *) echo "Tests were cancelled."; exit 1 ;;
-            esac
-          done
-
   # The only required check of this workflow, so the ruleset doesn't change when jobs are added. It must always run,
   # and only passes when every job it needs succeeded (a skipped required check would count as a pass).
   ci-result:
@@ -63,7 +45,6 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build
-      - check-build-status
     if: always()
     steps:
       - name: Evaluate the results
